@@ -269,9 +269,12 @@ Important:
             
             # Generate content config with JSON mode (no strict schema to avoid validation issues)
             generate_content_config = types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=0,  # Disable thinking mode for faster responses
+                ),
                 response_mime_type="application/json",
             )
-            pipeline_logger.debug(f"[GEMINI] Config created with JSON mode (no strict schema)")
+            pipeline_logger.debug(f"[GEMINI] Config created with JSON mode (thinking disabled)")
             
             # Generate content with structured output (non-streaming)
             response = self.client.models.generate_content(
@@ -385,9 +388,12 @@ Important:
             
             # Generate content config with JSON mode (no strict schema to avoid validation issues)
             generate_content_config = types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=0,  # Disable thinking mode for faster responses
+                ),
                 response_mime_type="application/json",
             )
-            pipeline_logger.debug(f"[GEMINI] Config created with JSON mode (no strict schema)")
+            pipeline_logger.debug(f"[GEMINI] Config created with JSON mode (thinking disabled)")
             
             # Generate content with structured output (non-streaming)
             response = self.client.models.generate_content(

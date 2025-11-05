@@ -31,6 +31,7 @@ import {
   type AnalysisStatus 
 } from '@/lib/api';
 import ProcessingStatusText from '@/components/ProcessingStatusText';
+import MarkdownContent from '@/components/MarkdownContent';
 
 export default function ProductDetailPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -324,14 +325,7 @@ export default function ProductDetailPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ul className="space-y-2">
-                      {analysis.pros.map((pro, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="text-green-500 mt-1">•</span>
-                          <span>{pro}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <MarkdownContent content={analysis.pros.join('\n\n')} />
                   </CardContent>
                 </Card>
 
@@ -342,14 +336,7 @@ export default function ProductDetailPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ul className="space-y-2">
-                      {analysis.cons.map((con, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="text-red-500 mt-1">•</span>
-                          <span>{con}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <MarkdownContent content={analysis.cons.join('\n\n')} />
                   </CardContent>
                 </Card>
               </div>
@@ -621,10 +608,7 @@ export default function ProductDetailPage() {
                     <CardTitle>Product Description</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div 
-                      className="prose prose-sm max-w-none dark:prose-invert"
-                      dangerouslySetInnerHTML={{ __html: analysis.description.replace(/\n/g, '<br />') }}
-                    />
+                    <MarkdownContent content={analysis.description} />
                   </CardContent>
                 </Card>
               )}

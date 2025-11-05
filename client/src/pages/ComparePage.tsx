@@ -16,6 +16,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { getProducts, compareProducts, type Product, type Comparison } from '@/lib/api';
+import MarkdownContent from '@/components/MarkdownContent';
 
 export default function ComparePage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -268,28 +269,18 @@ export default function ComparePage() {
                           <h4 className="font-semibold mb-2 flex items-center gap-2">
                             <CheckCircle2 className="w-4 h-4 text-green-500" /> Pros
                           </h4>
-                          <ul className="space-y-1 text-sm">
-                            {prosCons.pros.map((pro, idx) => (
-                              <li key={idx} className="flex items-start gap-2">
-                                <span className="text-green-500 mt-1">•</span>
-                                <span>{pro}</span>
-                              </li>
-                            ))}
-                          </ul>
+                          <div className="text-sm">
+                            <MarkdownContent content={prosCons.pros.join('\n\n')} />
+                          </div>
                         </div>
                         <Separator />
                         <div>
                           <h4 className="font-semibold mb-2 flex items-center gap-2">
                             <XCircle className="w-4 h-4 text-red-500" /> Cons
                           </h4>
-                          <ul className="space-y-1 text-sm">
-                            {prosCons.cons.map((con, idx) => (
-                              <li key={idx} className="flex items-start gap-2">
-                                <span className="text-red-500 mt-1">•</span>
-                                <span>{con}</span>
-                              </li>
-                            ))}
-                          </ul>
+                          <div className="text-sm">
+                            <MarkdownContent content={prosCons.cons.join('\n\n')} />
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -324,14 +315,7 @@ export default function ComparePage() {
                   <CardTitle>Key Differences</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ul className="space-y-2">
-                    {comparison.key_differences.map((diff, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-primary mt-1">•</span>
-                        <span>{diff}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <MarkdownContent content={comparison.key_differences.join('\n\n')} />
                 </CardContent>
               </Card>
             )}
