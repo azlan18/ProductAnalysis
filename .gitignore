@@ -1,0 +1,59 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors/IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Node / Frontend
+node_modules/
+client/.next/
+client/.turbo/
+client/.cache/
+client/dist/
+client/build/
+client/.parcel-cache/
+
+# Python / Backend
+server/venv/
+server/.venv/
+server/__pycache__/
+server/.mypy_cache/
+server/.pytest_cache/
+server/.ruff_cache/
+*.pyc
+*.pyo
+
+# Environments / Secrets
+*.env
+*.env.*
+server/.env
+
+# Logs
+logs/
+server/logs/
+client/logs/
+*.log
+
+# Coverage / Reports
+coverage/
+.coverage*
+htmlcov/
+
+# Misc
+.cache/
+.tmp/
+**/.DS_Store
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# Local tooling
+.envrc
+.direnv/
+
+
