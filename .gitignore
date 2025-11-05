@@ -30,6 +30,9 @@ server/.ruff_cache/
 *.env
 *.env.*
 server/.env
+# but keep example env files tracked
+!server/.env.example
+!.env.example
 
 # Logs
 logs/
