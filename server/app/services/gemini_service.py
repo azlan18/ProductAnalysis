@@ -3,6 +3,7 @@ Service for interacting with Google Gemini LLM API.
 """
 import json
 import re
+import tempfile
 from typing import Dict, Any, List
 from google import genai
 from google.genai import types
@@ -219,48 +220,6 @@ Important:
 - Include all products in comparison_matrix and pros_cons
 """
     
-    def _extract_json_from_response(self, response_text: str) -> Dict[str, Any]:
-        """
-        Extract JSON from LLM response text.
-        Handles cases where response may include markdown code blocks.
-        
-        Args:
-            response_text: Raw response text from LLM
-            
-        Returns:
-            Parsed JSON dictionary
-        """
-        pipeline_logger.debug(f"[GEMINI] Extracting JSON from response (length: {len(response_text)} chars)")
-        
-        # Try to find JSON in code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-            pipeline_logger.debug(f"[GEMINI] Found JSON in code block")
-        else:
-            # Try to find JSON object directly
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-                pipeline_logger.debug(f"[GEMINI] Found JSON object directly")
-            else:
-                json_str = response_text
-                pipeline_logger.warning(f"[GEMINI] No JSON pattern found, using full response text")
-        
-        # Clean up the JSON string
-        json_str = json_str.strip()
-        pipeline_logger.debug(f"[GEMINI] JSON string length: {len(json_str)} chars")
-        
-        try:
-            parsed_json = json.loads(json_str)
-            pipeline_logger.debug(f"[GEMINI] Successfully parsed JSON")
-            return parsed_json
-        except json.JSONDecodeError as e:
-            pipeline_logger.error(f"[GEMINI] Failed to parse JSON - Error: {str(e)}")
-            pipeline_logger.error(f"[GEMINI] JSON string (first 500 chars): {json_str[:500]}")
-            pipeline_logger.error(f"[GEMINI] JSON string (last 500 chars): {json_str[-500:]}")
-            raise Exception(f"Failed to parse JSON from LLM response: {str(e)}\nResponse: {response_text[:500]}")
-    
     async def analyze_product(self, reviews: List[str]) -> Dict[str, Any]:
         """
         Analyze product reviews using Gemini LLM.
@@ -296,7 +255,7 @@ Important:
         pipeline_logger.debug(f"[GEMINI] Prompt preview (first 1000 chars): {prompt[:1000]}...")
         
         try:
-            pipeline_logger.info(f"[GEMINI] Calling Gemini API with model: {self.model_name}")
+            pipeline_logger.info(f"[GEMINI] Calling Gemini API with model: {self.model_name} (JSON mode)")
             
             # Create content with the prompt
             contents = [
@@ -308,58 +267,84 @@ Important:
                 ),
             ]
             
-            # Generate content config - try with ThinkingConfig, fallback without it
-            try:
-                generate_content_config = types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(),
-                )
-                pipeline_logger.debug(f"[GEMINI] Config created with ThinkingConfig")
-            except AttributeError:
-                # Fallback if ThinkingConfig not available
-                generate_content_config = types.GenerateContentConfig()
-                pipeline_logger.debug(f"[GEMINI] Config created without ThinkingConfig (fallback)")
+            # Generate content config with JSON mode (no strict schema to avoid validation issues)
+            generate_content_config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
+            pipeline_logger.debug(f"[GEMINI] Config created with JSON mode (no strict schema)")
             
-            # Generate content stream and collect full response
-            full_response = ""
-            chunk_count = 0
-            pipeline_logger.debug(f"[GEMINI] Starting streaming response...")
-            
-            for chunk in self.client.models.generate_content_stream(
+            # Generate content with structured output (non-streaming)
+            response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
                 config=generate_content_config,
-            ):
-                if chunk.text:
-                    full_response += chunk.text
-                    chunk_count += 1
-                    if chunk_count % 10 == 0:
-                        pipeline_logger.debug(f"[GEMINI] Received {chunk_count} chunks, response length: {len(full_response)} chars")
+            )
             
-            pipeline_logger.info(f"[GEMINI] Streaming completed - Total chunks: {chunk_count}, Response length: {len(full_response)} characters")
-            pipeline_logger.debug(f"[GEMINI] Response preview (first 1000 chars): {full_response[:1000]}...")
-            pipeline_logger.debug(f"[GEMINI] Response preview (last 500 chars): ...{full_response[-500:]}")
+            pipeline_logger.info(f"[GEMINI] Response received - Length: {len(response.text)} characters")
             
-            # Extract JSON from response
-            pipeline_logger.debug(f"[GEMINI] Extracting JSON from response...")
-            analysis_result = self._extract_json_from_response(full_response)
-            
-            pipeline_logger.info(f"[GEMINI] Successfully parsed JSON response")
-            pipeline_logger.debug(f"[GEMINI] Analysis result keys: {list(analysis_result.keys())}")
-            
-            # Log key metrics from analysis
-            if "sentiment" in analysis_result:
-                sentiment_score = analysis_result["sentiment"].get("score", "N/A")
-                pipeline_logger.info(f"[GEMINI] Analysis complete - Sentiment score: {sentiment_score}")
-            
-            if "top_praises" in analysis_result:
-                pipeline_logger.debug(f"[GEMINI] Top praises count: {len(analysis_result['top_praises'])}")
-            
-            if "top_complaints" in analysis_result:
-                pipeline_logger.debug(f"[GEMINI] Top complaints count: {len(analysis_result['top_complaints'])}")
-            
-            pipeline_logger.debug(f"[GEMINI] Full analysis result: {json.dumps(analysis_result, indent=2, default=str)}")
-            
-            return analysis_result
+            # Parse JSON response (with cleaning for malformed JSON)
+            if response.text:
+                try:
+                    # Try direct parsing first
+                    analysis_result = json.loads(response.text)
+                    pipeline_logger.info(f"[GEMINI] Successfully parsed JSON response")
+                except json.JSONDecodeError as e:
+                    pipeline_logger.warning(f"[GEMINI] Initial JSON parse failed: {str(e)}, attempting to clean and retry")
+                    
+                    # Clean common JSON issues
+                    cleaned_text = response.text
+                    
+                    # Remove markdown code blocks if present
+                    import re
+                    cleaned_text = re.sub(r'```json\s*', '', cleaned_text)
+                    cleaned_text = re.sub(r'```\s*$', '', cleaned_text)
+                    
+                    # Try to extract JSON if it's embedded in other text
+                    json_match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
+                    if json_match:
+                        cleaned_text = json_match.group(0)
+                    
+                    # Log the problematic area for debugging
+                    error_pos = getattr(e, 'pos', 0)
+                    context_start = max(0, error_pos - 100)
+                    context_end = min(len(cleaned_text), error_pos + 100)
+                    pipeline_logger.error(f"[GEMINI] JSON error near position {error_pos}")
+                    pipeline_logger.error(f"[GEMINI] Context: ...{cleaned_text[context_start:context_end]}...")
+                    
+                    try:
+                        # Try parsing cleaned version
+                        analysis_result = json.loads(cleaned_text)
+                        pipeline_logger.info(f"[GEMINI] Successfully parsed JSON after cleaning")
+                    except json.JSONDecodeError as e2:
+                        pipeline_logger.error(f"[GEMINI] Failed to parse JSON even after cleaning - Error: {str(e2)}")
+                        pipeline_logger.error(f"[GEMINI] Full response text saved for debugging")
+                        
+                        # Save the full response for debugging
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                            f.write(response.text)
+                            pipeline_logger.error(f"[GEMINI] Full response saved to: {f.name}")
+                        
+                        raise Exception(f"Failed to parse JSON from LLM response even after cleaning: {str(e2)}")
+                
+                pipeline_logger.debug(f"[GEMINI] Analysis result keys: {list(analysis_result.keys())}")
+                
+                # Log key metrics from analysis
+                if "sentiment" in analysis_result:
+                    sentiment_score = analysis_result["sentiment"].get("score", "N/A")
+                    pipeline_logger.info(f"[GEMINI] Analysis complete - Sentiment score: {sentiment_score}")
+                
+                if "top_praises" in analysis_result:
+                    pipeline_logger.debug(f"[GEMINI] Top praises count: {len(analysis_result['top_praises'])}")
+                
+                if "top_complaints" in analysis_result:
+                    pipeline_logger.debug(f"[GEMINI] Top complaints count: {len(analysis_result['top_complaints'])}")
+                
+                pipeline_logger.debug(f"[GEMINI] Full analysis result: {json.dumps(analysis_result, indent=2, default=str)}")
+                
+                return analysis_result
+            else:
+                raise Exception("Empty response from Gemini API")
             
         except Exception as e:
             pipeline_logger.error(f"[GEMINI] Error analyzing product: {str(e)}", exc_info=True)
@@ -386,7 +371,7 @@ Important:
         pipeline_logger.debug(f"[GEMINI] Prompt preview (first 1000 chars): {prompt[:1000]}...")
         
         try:
-            pipeline_logger.info(f"[GEMINI] Calling Gemini API for comparison with model: {self.model_name}")
+            pipeline_logger.info(f"[GEMINI] Calling Gemini API for comparison with model: {self.model_name} (JSON mode)")
             
             # Create content with the prompt
             contents = [
@@ -398,47 +383,74 @@ Important:
                 ),
             ]
             
-            # Generate content config - try with ThinkingConfig, fallback without it
-            try:
-                generate_content_config = types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(),
-                )
-                pipeline_logger.debug(f"[GEMINI] Config created with ThinkingConfig")
-            except AttributeError:
-                # Fallback if ThinkingConfig not available
-                generate_content_config = types.GenerateContentConfig()
-                pipeline_logger.debug(f"[GEMINI] Config created without ThinkingConfig (fallback)")
+            # Generate content config with JSON mode (no strict schema to avoid validation issues)
+            generate_content_config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
+            pipeline_logger.debug(f"[GEMINI] Config created with JSON mode (no strict schema)")
             
-            # Generate content stream and collect full response
-            full_response = ""
-            chunk_count = 0
-            pipeline_logger.debug(f"[GEMINI] Starting streaming response...")
-            
-            for chunk in self.client.models.generate_content_stream(
+            # Generate content with structured output (non-streaming)
+            response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
                 config=generate_content_config,
-            ):
-                if chunk.text:
-                    full_response += chunk.text
-                    chunk_count += 1
+            )
             
-            pipeline_logger.info(f"[GEMINI] Streaming completed - Total chunks: {chunk_count}, Response length: {len(full_response)} characters")
-            pipeline_logger.debug(f"[GEMINI] Response preview (first 1000 chars): {full_response[:1000]}...")
+            pipeline_logger.info(f"[GEMINI] Response received - Length: {len(response.text)} characters")
             
-            # Extract JSON from response
-            pipeline_logger.debug(f"[GEMINI] Extracting JSON from comparison response...")
-            comparison_result = self._extract_json_from_response(full_response)
-            
-            pipeline_logger.info(f"[GEMINI] Successfully parsed comparison JSON")
-            pipeline_logger.debug(f"[GEMINI] Comparison result keys: {list(comparison_result.keys())}")
-            
-            if "overall_winner" in comparison_result:
-                pipeline_logger.info(f"[GEMINI] Overall winner: {comparison_result['overall_winner']}")
-            
-            pipeline_logger.debug(f"[GEMINI] Full comparison result: {json.dumps(comparison_result, indent=2, default=str)}")
-            
-            return comparison_result
+            # Parse JSON response (with cleaning for malformed JSON)
+            if response.text:
+                try:
+                    # Try direct parsing first
+                    comparison_result = json.loads(response.text)
+                    pipeline_logger.info(f"[GEMINI] Successfully parsed JSON response")
+                except json.JSONDecodeError as e:
+                    pipeline_logger.warning(f"[GEMINI] Initial JSON parse failed: {str(e)}, attempting to clean and retry")
+                    
+                    # Clean common JSON issues
+                    cleaned_text = response.text
+                    
+                    # Remove markdown code blocks if present
+                    cleaned_text = re.sub(r'```json\s*', '', cleaned_text)
+                    cleaned_text = re.sub(r'```\s*$', '', cleaned_text)
+                    
+                    # Try to extract JSON if it's embedded in other text
+                    json_match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
+                    if json_match:
+                        cleaned_text = json_match.group(0)
+                    
+                    # Log the problematic area for debugging
+                    error_pos = getattr(e, 'pos', 0)
+                    context_start = max(0, error_pos - 100)
+                    context_end = min(len(cleaned_text), error_pos + 100)
+                    pipeline_logger.error(f"[GEMINI] JSON error near position {error_pos}")
+                    pipeline_logger.error(f"[GEMINI] Context: ...{cleaned_text[context_start:context_end]}...")
+                    
+                    try:
+                        # Try parsing cleaned version
+                        comparison_result = json.loads(cleaned_text)
+                        pipeline_logger.info(f"[GEMINI] Successfully parsed JSON after cleaning")
+                    except json.JSONDecodeError as e2:
+                        pipeline_logger.error(f"[GEMINI] Failed to parse JSON even after cleaning - Error: {str(e2)}")
+                        pipeline_logger.error(f"[GEMINI] Full response text saved for debugging")
+                        
+                        # Save the full response for debugging
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                            f.write(response.text)
+                            pipeline_logger.error(f"[GEMINI] Full response saved to: {f.name}")
+                        
+                        raise Exception(f"Failed to parse JSON from LLM response even after cleaning: {str(e2)}")
+                
+                pipeline_logger.debug(f"[GEMINI] Comparison result keys: {list(comparison_result.keys())}")
+                
+                if "overall_winner" in comparison_result:
+                    pipeline_logger.info(f"[GEMINI] Overall winner: {comparison_result['overall_winner']}")
+                
+                pipeline_logger.debug(f"[GEMINI] Full comparison result: {json.dumps(comparison_result, indent=2, default=str)}")
+                
+                return comparison_result
+            else:
+                raise Exception("Empty response from Gemini API")
             
         except Exception as e:
             pipeline_logger.error(f"[GEMINI] Error comparing products: {str(e)}", exc_info=True)

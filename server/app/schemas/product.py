@@ -43,7 +43,7 @@ class AnalysisStatusResponse(BaseModel):
 class PriceInfo(BaseModel):
     """Schema for price information."""
     source: str
-    url: str
+    url: Optional[str] = None
     price: Optional[str] = None
     currency: Optional[str] = None
 
